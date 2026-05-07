@@ -1,0 +1,52 @@
+name: Refresh OpenOcean quote snapshots
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openocean-quote-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-quotes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fetch OpenOcean quotes
+        run: |
+          python scripts/fetch_openocean_quotes.py \
+            --sleep 2 \
+            --max-requests-per-10s 5 \
+            --history-retention-hours 24
+
+      - name: Commit refreshed quote data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/openocean_optimism_quote_snapshots.csv data/openocean_optimism_quote_history.csv
+          if git diff --cached --quiet; then
+            echo "No quote data changes to commit."
+          else
+            git commit -m "Refresh OpenOcean quote snapshots"
+            git push
+          fi

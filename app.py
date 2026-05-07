@@ -14,6 +14,8 @@ import streamlit as st
 
 from utils import (
     DEFAULT_DATA_PATH,
+    DEFAULT_HISTORY_PATH,
+    aggregate_quote_history,
     clean_quote_data,
     explode_dexes,
     format_number,
@@ -198,10 +200,40 @@ def load_default_data(path: str, modified_at: float) -> pd.DataFrame:
     return clean_quote_data(read_csv(path))
 
 
+@st.cache_data(show_spinner="Loading quote history...")
+def load_history_data(path: str, modified_at: float) -> pd.DataFrame:
+    _ = modified_at
+    return clean_quote_data(read_csv(path))
+
+
 @st.cache_data(show_spinner="Loading uploaded quote CSV...")
 def load_uploaded_data(file_bytes: bytes, file_name: str) -> pd.DataFrame:
     _ = file_name
     return clean_quote_data(read_csv(io.BytesIO(file_bytes)))
+
+
+def rolling_history_view(history_df: pd.DataFrame, hours: int = 24) -> tuple[pd.DataFrame, dict]:
+    valid_times = history_df["snapshot_time"].dropna()
+    if valid_times.empty:
+        return history_df.iloc[0:0].copy(), {
+            "window_start": pd.NaT,
+            "window_end": pd.NaT,
+            "raw_rows": 0,
+            "snapshots": 0,
+        }
+
+    window_end = valid_times.max()
+    window_start = window_end - pd.Timedelta(hours=hours)
+    window_df = history_df[history_df["snapshot_time"].between(window_start, window_end, inclusive="both")].copy()
+    snapshot_key = "snapshot_run_id" if "snapshot_run_id" in window_df.columns else "snapshot_minute"
+    snapshots = window_df[snapshot_key].replace("", pd.NA).dropna().nunique() if not window_df.empty else 0
+    summary_df = aggregate_quote_history(window_df)
+    return summary_df, {
+        "window_start": window_start,
+        "window_end": window_end,
+        "raw_rows": len(window_df),
+        "snapshots": int(snapshots),
+    }
 
 
 def style_figure(fig: go.Figure, title: str, subtitle: str | None = None, height: int = 420) -> go.Figure:
@@ -243,7 +275,7 @@ def render_chart(fig: go.Figure, title: str, caption: str | None = None, height:
             st.caption(caption)
 
 
-def load_data_ui() -> tuple[pd.DataFrame, str]:
+def load_data_ui() -> tuple[pd.DataFrame, str, str]:
     st.sidebar.header("Data")
     uploaded_file = st.sidebar.file_uploader(
         "Upload OpenOcean quote CSV",
@@ -254,15 +286,50 @@ def load_data_ui() -> tuple[pd.DataFrame, str]:
     if uploaded_file is not None:
         df = load_uploaded_data(uploaded_file.getvalue(), uploaded_file.name)
         source = uploaded_file.name
+        basis = "Uploaded CSV"
     else:
         if not DEFAULT_DATA_PATH.exists():
             st.error(f"Default quote CSV not found at {DEFAULT_DATA_PATH}. Run the OpenOcean collector or upload a CSV.")
             st.stop()
-        df = load_default_data(str(DEFAULT_DATA_PATH), DEFAULT_DATA_PATH.stat().st_mtime)
-        source = str(DEFAULT_DATA_PATH)
+        latest_df = load_default_data(str(DEFAULT_DATA_PATH), DEFAULT_DATA_PATH.stat().st_mtime)
+        basis_options = ["Latest snapshot"]
+        history_df = None
+        if DEFAULT_HISTORY_PATH.exists():
+            history_df = load_history_data(str(DEFAULT_HISTORY_PATH), DEFAULT_HISTORY_PATH.stat().st_mtime)
+            basis_options.append("Last 24h median")
+        else:
+            st.sidebar.caption("24h median appears after the hourly workflow creates history.")
+
+        basis = st.sidebar.radio(
+            "Quote basis",
+            basis_options,
+            horizontal=True,
+            help="Latest uses the newest collector run. Last 24h median collapses hourly snapshots by pair and trade size.",
+        )
+
+        if basis == "Last 24h median" and history_df is not None:
+            df, history_meta = rolling_history_view(history_df, hours=24)
+            source = str(DEFAULT_HISTORY_PATH)
+            start = history_meta["window_start"]
+            end = history_meta["window_end"]
+            if pd.notna(start) and pd.notna(end):
+                st.sidebar.caption(
+                    f"24h window: {start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M} UTC"
+                )
+            st.sidebar.caption(
+                f"{history_meta['snapshots']:,} snapshots | {history_meta['raw_rows']:,} raw quote rows"
+            )
+            if df.empty:
+                st.sidebar.warning("No quote rows found in the 24h history window. Showing latest snapshot instead.")
+                df = latest_df
+                source = str(DEFAULT_DATA_PATH)
+                basis = "Latest snapshot"
+        else:
+            df = latest_df
+            source = str(DEFAULT_DATA_PATH)
 
     st.sidebar.caption(f"Loaded `{source}`")
-    return df, source
+    return df, source, basis
 
 
 def latest_snapshot_text(df: pd.DataFrame) -> str:
@@ -463,7 +530,11 @@ def valid_quotes(df: pd.DataFrame) -> pd.DataFrame:
 
 def overview_metrics(filtered_df: pd.DataFrame, valid_df: pd.DataFrame) -> list[tuple[str, str, str]]:
     total = len(filtered_df)
-    success = int(filtered_df["quote_success"].sum()) if total else 0
+    if "quote_count_24h" in filtered_df.columns:
+        total = int(filtered_df["quote_count_24h"].sum()) if len(filtered_df) else 0
+        success = int(filtered_df["success_count_24h"].sum()) if total else 0
+    else:
+        success = int(filtered_df["quote_success"].sum()) if total else 0
     if valid_df.empty:
         return [
             ("Simulated quote volume", "n/a", "Successful quote rows only"),
@@ -474,8 +545,12 @@ def overview_metrics(filtered_df: pd.DataFrame, valid_df: pd.DataFrame) -> list[
             ("Worst quote cost", "n/a", "Highest execution cost %"),
         ]
 
+    volume = valid_df["trade_size_usd"].sum()
+    if "success_count_24h" in valid_df.columns:
+        volume = (valid_df["trade_size_usd"] * valid_df["success_count_24h"]).sum()
+
     return [
-        ("Simulated quote volume", format_usd(valid_df["trade_size_usd"].sum()), "Sum of successful quote input sizes"),
+        ("Simulated quote volume", format_usd(volume), "Sum of successful quote input sizes"),
         ("Quote attempts", f"{total:,}", "Rows after filters"),
         ("Successful quotes", format_share(success, total), "OpenOcean returned usable output"),
         ("Median quote cost", format_pct(valid_df["execution_cost_pct_display"].median()), "Input USD minus quoted output USD"),
@@ -509,21 +584,25 @@ def apply_percent_colorbar(fig: go.Figure) -> None:
 
 
 def render_cost_by_size(valid_df: pd.DataFrame, settings: dict) -> None:
+    hover_data = {
+        "snapshot_time": "|%Y-%m-%d %H:%M:%S",
+        "trade_size_usd": ":$,.0f",
+        "quoted_out_value_usd": ":$,.2f",
+        "execution_cost_usd": ":$,.2f",
+        "execution_cost_pct_display": ":.2f",
+        "openocean_price_impact": True,
+        "dex_count": True,
+    }
+    if "quote_count_24h" in valid_df.columns:
+        hover_data.update({"quote_count_24h": True, "success_rate_24h": ":.0%"})
+
     fig = px.line(
         valid_df.sort_values(["quote_pair", "trade_size_usd"]),
         x="trade_size_usd",
         y="execution_cost_pct_display",
         color="quote_pair",
         markers=True,
-        hover_data={
-            "snapshot_time": "|%Y-%m-%d %H:%M:%S",
-            "trade_size_usd": ":$,.0f",
-            "quoted_out_value_usd": ":$,.2f",
-            "execution_cost_usd": ":$,.2f",
-            "execution_cost_pct_display": ":.2f",
-            "openocean_price_impact": True,
-            "dex_count": True,
-        },
+        hover_data=hover_data,
         labels={
             "trade_size_usd": "Input size (USD)",
             "execution_cost_pct_display": "Quote execution cost (%)",
@@ -539,10 +618,12 @@ def render_cost_by_size(valid_df: pd.DataFrame, settings: dict) -> None:
 
 
 def render_pair_summary(valid_df: pd.DataFrame, settings: dict) -> None:
+    summary_input = valid_df.copy()
+    summary_input["_quote_count"] = summary_input["quote_count_24h"] if "quote_count_24h" in summary_input.columns else 1
     summary = (
-        valid_df.groupby("quote_pair", dropna=False)
+        summary_input.groupby("quote_pair", dropna=False)
         .agg(
-            quotes=("quote_pair", "count"),
+            quotes=("_quote_count", "sum"),
             median_pct=("execution_cost_pct_display", "median"),
             p95_pct=("execution_cost_pct_display", lambda x: x.quantile(0.95)),
             max_pct=("execution_cost_pct_display", "max"),
@@ -661,6 +742,8 @@ QUOTE_COLUMNS = [
     "snapshot_time",
     "chain",
     "quote_pair",
+    "quote_count_24h",
+    "success_rate_24h",
     "trade_size_usd",
     "quoted_out_value_usd",
     "execution_cost_usd",
@@ -719,6 +802,8 @@ def render_quote_explorer(filtered_df: pd.DataFrame) -> None:
         column_config={
             "snapshot_time": st.column_config.DatetimeColumn("Snapshot time", format="YYYY-MM-DD HH:mm:ss", width="medium"),
             "quote_pair": st.column_config.TextColumn("Quote pair", width="medium"),
+            "quote_count_24h": st.column_config.NumberColumn("24h samples", format="%.0f", width="small"),
+            "success_rate_24h": st.column_config.NumberColumn("24h success", format="%.0%%", width="small"),
             "trade_size_usd": st.column_config.NumberColumn("Input size", format="$%.0f", width="small"),
             "input_amount_decimals": st.column_config.NumberColumn("Input amount", format="%.6f"),
             "quoted_out_amount_decimals": st.column_config.NumberColumn("Quoted output", format="%.6f"),
@@ -834,7 +919,7 @@ def render_downloads(filtered_df: pd.DataFrame) -> None:
 
 def main() -> None:
     inject_css()
-    df, source = load_data_ui()
+    df, source, basis = load_data_ui()
     render_refresh_controls(df)
     filtered_df, settings = sidebar_filters(df)
     render_downloads(filtered_df)
@@ -844,7 +929,7 @@ def main() -> None:
         <div class="dashboard-hero">
             <div class="eyebrow">ether.fi Cash - observed OpenOcean trade paths</div>
             <h1>Current Liquidity Simulation</h1>
-            <p>Static Optimism quote snapshots for observed ether.fi Cash trade paths, centered on $50k, $100k, $150k, and $200k requested input sizes.</p>
+            <p>Optimism OpenOcean quote snapshots for observed ether.fi Cash trade paths, with a toggle between the latest quote run and a rolling 24h median baseline.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -859,7 +944,7 @@ def main() -> None:
     end = filtered_df["snapshot_time"].max()
     date_text = "n/a" if pd.isna(start) or pd.isna(end) else f"{start:%Y-%m-%d %H:%M:%S} to {end:%Y-%m-%d %H:%M:%S} UTC"
     st.caption(
-        f"{len(filtered_df):,} rows | {len(valid_df):,} successful quotes | {date_text}"
+        f"{basis} | {len(filtered_df):,} rows | {len(valid_df):,} successful quotes | {date_text}"
     )
 
     overview_tab, explorer_tab, methodology_tab = st.tabs(["Overview", "Quote Explorer", "Methodology & Data Quality"])

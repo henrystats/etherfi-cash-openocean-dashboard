@@ -16,6 +16,7 @@ $200,000
 ```text
 data/trade_paths.csv
 data/openocean_optimism_quote_snapshots.csv
+data/openocean_optimism_quote_history.csv
 scripts/fetch_openocean_quotes.py
 ```
 
@@ -34,6 +35,8 @@ ETHFI>>>WETH
 ```
 
 `data/openocean_optimism_quote_snapshots.csv` is the latest quote snapshot file read by the dashboard. It is a temporary point-in-time output from OpenOcean and can be refreshed from the app.
+
+`data/openocean_optimism_quote_history.csv` stores the rolling 24-hour quote history used for the dashboard's 24h median baseline. The collector appends each new snapshot run to this file, then prunes rows outside the retention window.
 
 ## Quote Source
 
@@ -83,6 +86,7 @@ Interpretation:
 
 ```text
 snapshot_time_utc
+snapshot_run_id
 chain
 trade_size_usd
 in_token_symbol
@@ -113,6 +117,15 @@ response_status_code
 
 `execution_cost_bps` is kept in the raw CSV for compatibility, but the dashboard displays execution cost as a percent.
 
+## Latest Snapshot vs 24h Median
+
+The dashboard can show two quote bases:
+
+- Latest snapshot: the most recent OpenOcean collector run.
+- Last 24h median: median execution cost by quote pair and trade size across the rolling history file.
+
+The 24h median is intended as a more stable baseline for volatile or thin-liquidity pairs, while the latest snapshot reflects current market conditions at the last refresh time.
+
 ## Data Caveats
 
 - Quote snapshots are point-in-time and should be refreshed before analysis.
@@ -125,6 +138,6 @@ response_status_code
 
 The dashboard reads `data/openocean_optimism_quote_snapshots.csv` by default.
 
-The sidebar **Refresh quotes** button reruns `scripts/fetch_openocean_quotes.py`, updates the latest CSV, and reloads the dashboard with the new point-in-time quote data.
+The sidebar **Refresh quotes** button reruns `scripts/fetch_openocean_quotes.py`, updates the latest CSV, appends to the rolling history CSV, and reloads the dashboard with the new quote data.
 
 Generated timestamped CSV and raw JSONL files are audit artifacts. They are useful locally but are not required for the dashboard to run.

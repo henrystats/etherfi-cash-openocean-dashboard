@@ -8,10 +8,12 @@ import pandas as pd
 
 
 DEFAULT_DATA_PATH = Path("data/openocean_optimism_quote_snapshots.csv")
+DEFAULT_HISTORY_PATH = Path("data/openocean_optimism_quote_history.csv")
 HISTORICAL_DATA_PATH = Path("data/Investigate_Cash_Swap_Slippage.csv")
 
 EXPECTED_COLUMNS = [
     "snapshot_time_utc",
+    "snapshot_run_id",
     "chain",
     "trade_size_usd",
     "direction",
@@ -64,6 +66,7 @@ NUMERIC_COLUMNS = [
 
 STRING_COLUMNS = [
     "chain",
+    "snapshot_run_id",
     "direction",
     "in_token_symbol",
     "in_token_address",
@@ -187,6 +190,99 @@ def clean_quote_data(raw_df: pd.DataFrame) -> pd.DataFrame:
     df["dex_count"] = df["dexes_used"].map(count_dexes)
 
     return df
+
+
+def latest_nonempty(series: pd.Series) -> str:
+    values = series.astype("string").str.strip()
+    values = values.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "<NA>": pd.NA}).dropna()
+    return "" if values.empty else str(values.iloc[-1])
+
+
+def joined_unique(values: pd.Series) -> str:
+    seen: list[str] = []
+    for value in values.astype("string").dropna():
+        for part in str(value).split(","):
+            clean = part.strip()
+            if clean and clean not in seen:
+                seen.append(clean)
+    return ", ".join(seen)
+
+
+def aggregate_quote_history(df: pd.DataFrame) -> pd.DataFrame:
+    """Collapse raw quote attempts into one median row per pair and trade size."""
+    if df.empty:
+        return df.copy()
+
+    group_cols = [
+        "chain",
+        "direction",
+        "in_token_symbol",
+        "in_token_address",
+        "in_token_decimals",
+        "out_token_symbol",
+        "out_token_address",
+        "out_token_decimals",
+        "trade_size_usd",
+        "in_token_decimals_source",
+        "out_token_decimals_source",
+    ]
+    group_cols = [col for col in group_cols if col in df.columns]
+    ordered = df.sort_values("snapshot_time")
+    grouped = ordered.groupby(group_cols, dropna=False)
+
+    summary = grouped.agg(
+        quote_count_24h=("quote_success", "size"),
+        success_count_24h=("quote_success", "sum"),
+        snapshot_time=("snapshot_time", "max"),
+        estimated_in_token_price_usd=("estimated_in_token_price_usd", "median"),
+        input_amount_decimals=("input_amount_decimals", "median"),
+        quoted_out_amount_decimals=("quoted_out_amount_decimals", "median"),
+        quoted_out_value_usd=("quoted_out_value_usd", "median"),
+        execution_cost_usd=("execution_cost_usd", "median"),
+        execution_cost_bps=("execution_cost_bps", "median"),
+        execution_cost_pct=("execution_cost_pct", "median"),
+        estimated_gas=("estimated_gas", "median"),
+        gas_price=("gas_price", "median"),
+        amount_decimals=("amount_decimals", latest_nonempty),
+        input_amount_raw=("input_amount_raw", latest_nonempty),
+        quoted_out_amount_raw=("quoted_out_amount_raw", latest_nonempty),
+        price_source=("price_source", latest_nonempty),
+        quoted_out_value_source=("quoted_out_value_source", latest_nonempty),
+        openocean_price_impact=("openocean_price_impact", latest_nonempty),
+        route_summary=("route_summary", latest_nonempty),
+        dexes_used=("dexes_used", joined_unique),
+        error_message=("error_message", latest_nonempty),
+        request_url=("request_url", latest_nonempty),
+        response_status_code=("response_status_code", "max"),
+    ).reset_index()
+
+    summary["quote_success"] = summary["success_count_24h"].gt(0)
+    summary["success_rate_24h"] = summary["success_count_24h"] / summary["quote_count_24h"]
+    summary["snapshot_time_utc"] = summary["snapshot_time"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    summary["snapshot_run_id"] = "24h_median"
+    summary["quote_pair"] = summary["in_token_symbol"] + " -> " + summary["out_token_symbol"]
+    summary["target_token"] = np.where(summary["in_token_symbol"].eq("USDC"), summary["out_token_symbol"], summary["in_token_symbol"])
+    summary["direction_label"] = summary["direction"].map(direction_label)
+    summary["trade_size_label"] = summary["trade_size_usd"].map(format_trade_size_label)
+    summary["trade_size_sort"] = summary["trade_size_usd"].fillna(0)
+    summary["execution_cost_pct_display"] = summary["execution_cost_pct"] * 100
+    summary["openocean_price_impact_pct"] = parse_price_impact_pct(summary["openocean_price_impact"])
+    summary["quote_status"] = np.where(summary["quote_success"], "Success", "Failed")
+    summary["valid_quote"] = (
+        summary["quote_success"]
+        & summary["execution_cost_bps"].notna()
+        & summary["execution_cost_usd"].notna()
+        & summary["trade_size_usd"].notna()
+        & summary["quoted_out_value_usd"].notna()
+    )
+    summary["negative_execution_cost"] = summary["execution_cost_bps"] < 0
+    summary["high_execution_cost_gt_500_bps"] = summary["execution_cost_bps"] > 500
+    summary["missing_output_value"] = summary["quoted_out_value_usd"].isna()
+    summary["missing_route"] = summary["dexes_used"].eq("") | summary["route_summary"].eq("")
+    summary["failed_reason"] = summary["error_message"].replace("", pd.NA).fillna("No error")
+    summary["dex_count"] = summary["dexes_used"].map(count_dexes)
+    summary["basis"] = "Last 24h median"
+    return summary
 
 
 def count_dexes(value: object) -> int:

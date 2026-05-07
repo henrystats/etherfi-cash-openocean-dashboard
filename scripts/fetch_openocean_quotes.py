@@ -90,6 +90,7 @@ TOKENS: list[dict[str, Any]] = [
 
 OUTPUT_COLUMNS = [
     "snapshot_time_utc",
+    "snapshot_run_id",
     "chain",
     "trade_size_usd",
     "direction",
@@ -123,6 +124,8 @@ OUTPUT_COLUMNS = [
     "in_token_decimals_source",
     "out_token_decimals_source",
 ]
+
+HISTORY_FILENAME = "openocean_optimism_quote_history.csv"
 
 
 @dataclass
@@ -899,7 +902,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per request. Default: 3.")
     parser.add_argument("--max-requests-per-10s", type=int, default=8, help="Client-side request window cap. Default: 8 requests per 10 seconds.")
     parser.add_argument("--max-429-sleep", type=float, default=60.0, help="Max seconds to sleep after a 429 before retrying. Default: 60.")
+    parser.add_argument("--history-retention-hours", type=float, default=24.0, help="Hours of quote history to keep. Default: 24.")
     return parser.parse_args()
+
+
+def append_history(latest_df: pd.DataFrame, history_csv: Path, retention_hours: float) -> pd.DataFrame:
+    existing = pd.DataFrame()
+    if history_csv.exists():
+        try:
+            existing = pd.read_csv(history_csv, low_memory=False)
+        except pd.errors.EmptyDataError:
+            existing = pd.DataFrame()
+
+    combined = pd.concat([existing, latest_df], ignore_index=True)
+    for column in OUTPUT_COLUMNS:
+        if column not in combined.columns:
+            combined[column] = None
+
+    parsed_times = pd.to_datetime(combined["snapshot_time_utc"], errors="coerce", utc=True)
+    latest_time = parsed_times.max()
+    if pd.notna(latest_time) and retention_hours > 0:
+        cutoff = latest_time - pd.Timedelta(hours=retention_hours)
+        combined = combined.loc[parsed_times.ge(cutoff)].copy()
+
+    combined = combined[OUTPUT_COLUMNS]
+    history_csv.parent.mkdir(parents=True, exist_ok=True)
+    combined.to_csv(history_csv, index=False)
+    return combined
 
 
 def print_validation_summary(df: pd.DataFrame, expected_attempts: int) -> None:
@@ -953,6 +982,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     timestamp = run_timestamp()
     latest_csv = out_dir / "openocean_optimism_quote_snapshots.csv"
+    history_csv = out_dir / HISTORY_FILENAME
     timestamped_csv = out_dir / f"openocean_optimism_quote_snapshots_{timestamp}.csv"
     raw_jsonl = out_dir / f"openocean_optimism_quote_raw_{timestamp}.jsonl"
 
@@ -1044,15 +1074,18 @@ def main() -> None:
                 print(f"  failed: {record['error_message']}")
 
     df = pd.DataFrame(records)
+    df["snapshot_run_id"] = timestamp
     for column in OUTPUT_COLUMNS:
         if column not in df.columns:
             df[column] = None
     df = df[OUTPUT_COLUMNS]
     df.to_csv(latest_csv, index=False)
     df.to_csv(timestamped_csv, index=False)
+    history_df = append_history(df, history_csv, args.history_retention_hours)
 
     print("\nSaved outputs")
     print(f"  latest CSV:      {latest_csv}")
+    print(f"  history CSV:     {history_csv} ({len(history_df):,} rows retained)")
     print(f"  timestamped CSV: {timestamped_csv}")
     print(f"  raw JSONL:       {raw_jsonl}")
     print_validation_summary(df, expected_attempts=len(records))
