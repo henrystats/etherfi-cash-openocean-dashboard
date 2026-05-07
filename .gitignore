@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.streamlit/
+.DS_Store
+*.pyc
+data/.openocean_quote_refresh.lock
+data/openocean_optimism_quote_raw_*.jsonl
+data/openocean_optimism_quote_snapshots_*.csv
+data/Investigate_Cash_Swap_Slippage.csv
