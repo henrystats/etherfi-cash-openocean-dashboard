@@ -5,6 +5,7 @@ This project analyzes OpenOcean quote snapshots for observed ether.fi Cash trade
 The dashboard focuses on current quote execution cost for standardized input sizes:
 
 ```text
+$25,000
 $50,000
 $100,000
 $150,000

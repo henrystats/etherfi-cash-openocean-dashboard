@@ -23,7 +23,7 @@ QUOTE_URL = f"{BASE_URL}/quote"
 GAS_PRICE_URL = f"{BASE_URL}/gasPrice"
 TOKEN_LIST_URL = f"{BASE_URL}/tokenList"
 
-DEFAULT_SIZES = [Decimal("50000"), Decimal("100000"), Decimal("150000"), Decimal("200000")]
+DEFAULT_SIZES = [Decimal("25000"), Decimal("50000"), Decimal("100000"), Decimal("150000"), Decimal("200000")]
 DEFAULT_GAS_PRICE_DECIMALS = "1000000"
 USDC_ADDRESS = "0x0b2c639c533813f4aa9d7837caf62653d097ff85"
 DEFAULT_TRADE_PATHS_PATH = Path("data/trade_paths.csv")
@@ -890,7 +890,7 @@ def parse_sizes(value: str) -> list[Decimal]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fetch OpenOcean Optimism quote snapshots for ether.fi Cash tokens.")
     parser.add_argument("--out-dir", default="data", help="Output directory. Defaults to data.")
-    parser.add_argument("--sizes", type=parse_sizes, default=DEFAULT_SIZES, help="Comma-separated USD sizes. Default: 50000,100000,150000,200000")
+    parser.add_argument("--sizes", type=parse_sizes, default=DEFAULT_SIZES, help="Comma-separated USD sizes. Default: 25000,50000,100000,150000,200000")
     parser.add_argument(
         "--mode",
         choices=["trade-paths", "usdc-both", "token-to-usdc", "usdc-to-token", "all-pairs"],

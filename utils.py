@@ -86,7 +86,7 @@ STRING_COLUMNS = [
     "out_token_decimals_source",
 ]
 
-TRADE_SIZE_ORDER = [50_000, 100_000, 150_000, 200_000]
+TRADE_SIZE_ORDER = [25_000, 50_000, 100_000, 150_000, 200_000]
 DIRECTION_ORDER = ["actual_trade_path", "token_to_usdc", "usdc_to_token", "all_pairs"]
 
 

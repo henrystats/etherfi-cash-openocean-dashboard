@@ -46,6 +46,14 @@ PLOTLY_CONFIG = {
 
 COLORWAY = ["#63E6BE", "#74C0FC", "#FFD43B", "#FF922B", "#B197FC", "#F783AC", "#69DB7C", "#CED4DA"]
 REFERENCE_PCT = [0, 0.1, 0.5, 1, 5]
+HEATMAP_COST_COLORSCALE = [
+    [0.0, "#2F9E44"],
+    [0.3, "#2F9E44"],
+    [0.3, "#FFD43B"],
+    [0.6, "#FFD43B"],
+    [0.6, "#FF922B"],
+    [1.0, "#E03131"],
+]
 PROJECT_ROOT = Path(__file__).resolve().parent
 QUOTE_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "fetch_openocean_quotes.py"
 QUOTE_REFRESH_LOCK = PROJECT_ROOT / "data" / ".openocean_quote_refresh.lock"
@@ -680,7 +688,8 @@ def render_pair_heatmap(valid_df: pd.DataFrame) -> None:
     fig = px.imshow(
         matrix,
         aspect="auto",
-        color_continuous_scale="RdYlGn_r",
+        color_continuous_scale=HEATMAP_COST_COLORSCALE,
+        range_color=(0, 1),
         text_auto=".1f",
         labels=dict(x="Input size", y="Quote pair", color="Median %"),
     )
@@ -688,7 +697,12 @@ def render_pair_heatmap(valid_df: pd.DataFrame) -> None:
         texttemplate="%{z:.1f}%",
         hovertemplate="Quote pair: %{y}<br>Input size: %{x}<br>median = %{z:.2f}%<extra></extra>",
     )
-    apply_percent_colorbar(fig)
+    fig.update_layout(
+        coloraxis_colorbar=dict(
+            tickvals=[0, 0.3, 0.6, 1],
+            ticktext=["0%", "0.3%", "0.6%", "1%+"],
+        )
+    )
     heatmap_height = min(760, max(420, 180 + 18 * len(matrix)))
     render_chart(fig, "Pair x Size Heatmap", "Pairs are sorted by aggregate median execution cost across sizes.", height=heatmap_height)
 
