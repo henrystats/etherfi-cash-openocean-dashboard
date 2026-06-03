@@ -16,12 +16,14 @@ from utils import (
     DEFAULT_DATA_PATH,
     DEFAULT_HISTORY_PATH,
     aggregate_quote_history,
+    build_pair_size_heatmap_matrix,
     clean_quote_data,
     explode_dexes,
     format_number,
     format_pct,
     format_share,
     format_usd,
+    HEATMAP_COST_COLORSCALE,
     ordered_trade_size_labels,
     ordered_unique,
     pctile,
@@ -46,14 +48,6 @@ PLOTLY_CONFIG = {
 
 COLORWAY = ["#63E6BE", "#74C0FC", "#FFD43B", "#FF922B", "#B197FC", "#F783AC", "#69DB7C", "#CED4DA"]
 REFERENCE_PCT = [0, 0.1, 0.5, 1, 5]
-HEATMAP_COST_COLORSCALE = [
-    [0.0, "#2F9E44"],
-    [0.3, "#2F9E44"],
-    [0.3, "#FFD43B"],
-    [0.6, "#FFD43B"],
-    [0.6, "#FF922B"],
-    [1.0, "#E03131"],
-]
 PROJECT_ROOT = Path(__file__).resolve().parent
 QUOTE_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "fetch_openocean_quotes.py"
 QUOTE_REFRESH_LOCK = PROJECT_ROOT / "data" / ".openocean_quote_refresh.lock"
@@ -674,17 +668,7 @@ def render_pair_heatmap(valid_df: pd.DataFrame) -> None:
     if valid_df.empty:
         st.info("No successful quotes available for the heatmap.")
         return
-    pair_order = valid_df.groupby("quote_pair")["execution_cost_pct_display"].median().sort_values(ascending=False).index.tolist()
-    matrix = pd.pivot_table(
-        valid_df,
-        index="quote_pair",
-        columns="trade_size_label",
-        values="execution_cost_pct_display",
-        aggfunc="median",
-    )
-    size_order = ordered_trade_size_labels(valid_df)
-    matrix = matrix.reindex(index=pair_order)
-    matrix = matrix.reindex(columns=[size for size in size_order if size in matrix.columns])
+    matrix = build_pair_size_heatmap_matrix(valid_df)
     fig = px.imshow(
         matrix,
         aspect="auto",

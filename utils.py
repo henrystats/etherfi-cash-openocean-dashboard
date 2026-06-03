@@ -11,6 +11,15 @@ DEFAULT_DATA_PATH = Path("data/openocean_optimism_quote_snapshots.csv")
 DEFAULT_HISTORY_PATH = Path("data/openocean_optimism_quote_history.csv")
 HISTORICAL_DATA_PATH = Path("data/Investigate_Cash_Swap_Slippage.csv")
 
+HEATMAP_COST_COLORSCALE = [
+    [0.0, "#2F9E44"],
+    [0.3, "#2F9E44"],
+    [0.3, "#FFD43B"],
+    [0.6, "#FFD43B"],
+    [0.6, "#FF922B"],
+    [1.0, "#E03131"],
+]
+
 EXPECTED_COLUMNS = [
     "snapshot_time_utc",
     "snapshot_run_id",
@@ -309,6 +318,30 @@ def ordered_trade_size_labels(df: pd.DataFrame) -> list[str]:
         .tolist()
     )
     return ordered
+
+
+def build_pair_size_heatmap_matrix(df: pd.DataFrame) -> pd.DataFrame:
+    """Return pair x trade-size median execution cost %, sorted like the app heatmap."""
+    if df.empty:
+        return pd.DataFrame()
+
+    pair_order = (
+        df.groupby("quote_pair")["execution_cost_pct_display"]
+        .median()
+        .sort_values(ascending=False)
+        .index.tolist()
+    )
+    matrix = pd.pivot_table(
+        df,
+        index="quote_pair",
+        columns="trade_size_label",
+        values="execution_cost_pct_display",
+        aggfunc="median",
+    )
+    size_order = ordered_trade_size_labels(df)
+    matrix = matrix.reindex(index=pair_order)
+    matrix = matrix.reindex(columns=[size for size in size_order if size in matrix.columns])
+    return matrix
 
 
 def pctile(series: pd.Series, q: float) -> float:

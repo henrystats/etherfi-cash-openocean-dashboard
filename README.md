@@ -142,3 +142,35 @@ The dashboard reads `data/openocean_optimism_quote_snapshots.csv` by default.
 The sidebar **Refresh quotes** button reruns `scripts/fetch_openocean_quotes.py`, updates the latest CSV, appends to the rolling history CSV, and reloads the dashboard with the new quote data.
 
 Generated timestamped CSV and raw JSONL files are audit artifacts. They are useful locally but are not required for the dashboard to run.
+
+## Discord Heatmap Report
+
+`scripts/post_discord_heatmap.py` generates a static PNG version of the dashboard heatmap and can post it to Discord through a webhook. The image defaults mirror the Streamlit heatmap layout, while report metadata is sent in the Discord message text.
+
+By default, the report uses the rolling 24-hour median and limits the heatmap to USDC paths:
+
+```bash
+python scripts/post_discord_heatmap.py
+```
+
+Local outputs are written to:
+
+```text
+data/report_snapshots/
+```
+
+Each run writes:
+
+```text
+openocean_*_*.png
+openocean_*_*_matrix.csv
+openocean_*_*_rows.csv
+```
+
+To post locally, set a Discord webhook URL and pass `--post-discord`:
+
+```bash
+DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..." python scripts/post_discord_heatmap.py --post-discord
+```
+
+The GitHub workflow `.github/workflows/post-discord-heatmap.yml` posts automatically after the quote refresh workflow completes successfully. Add `DISCORD_WEBHOOK_URL` as a repository secret before enabling the workflow. The workflow also supports manual runs with either `24h-median` or `latest` basis, and `usdc` or `all` pair scope.
