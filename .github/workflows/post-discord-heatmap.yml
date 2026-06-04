@@ -2,9 +2,8 @@ name: Post Discord OpenOcean heatmap
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Refresh OpenOcean quote snapshots"]
-    types: [completed]
+  schedule:
+    - cron: "37 */4 * * *"
 
 permissions:
   contents: read
@@ -15,7 +14,6 @@ concurrency:
 
 jobs:
   post-heatmap:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

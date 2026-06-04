@@ -112,19 +112,13 @@ def valid_report_rows(df: pd.DataFrame, pair_scope: str) -> pd.DataFrame:
 
 
 def report_subtitle(meta: dict[str, Any], valid_df: pd.DataFrame, pair_scope: str) -> str:
-    pair_label = "USDC paths" if pair_scope == "usdc" else "All pairs"
-    start = meta.get("window_start")
+    _ = valid_df, pair_scope
     end = meta.get("window_end")
-    if pd.notna(start) and pd.notna(end):
-        window = f"{start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M} UTC"
-    elif pd.notna(end):
-        window = f"{end:%Y-%m-%d %H:%M:%S} UTC"
-    else:
-        window = "snapshot time unavailable"
+    fetched_at = f"{end:%Y-%m-%d %H:%M} UTC" if pd.notna(end) else "unknown"
 
     return (
-        f"{meta['basis']} | {pair_label} | {len(valid_df):,} successful quote rows | "
-        f"{valid_df['quote_pair'].nunique():,} pairs | {window}"
+        "Last 24h median Execution cost across all USDC Paths via OpenOcean Quotes\n"
+        f"Last quotes fetched: {fetched_at}"
     )
 
 
