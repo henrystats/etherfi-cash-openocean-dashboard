@@ -173,4 +173,4 @@ To post locally, set a Discord webhook URL and pass `--post-discord`:
 DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..." python scripts/post_discord_heatmap.py --post-discord
 ```
 
-The GitHub workflow `.github/workflows/post-discord-heatmap.yml` posts automatically after the quote refresh workflow completes successfully. Add `DISCORD_WEBHOOK_URL` as a repository secret before enabling the workflow. The workflow also supports manual runs with either `24h-median` or `latest` basis, and `usdc` or `all` pair scope.
+The GitHub workflow `.github/workflows/post-discord-heatmap.yml` posts automatically after the quote refresh workflow completes successfully. Add `DISCORD_WEBHOOK_URL` as a repository secret before enabling the workflow. The workflow can also be run manually, and it always posts the rolling 24-hour median for USDC paths.

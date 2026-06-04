@@ -292,7 +292,7 @@ def main() -> None:
     if not webhook_url:
         raise RuntimeError(f"--post-discord requires {args.discord_webhook_env} to be set")
 
-    content = args.discord_content or f"**{args.title}**\n{subtitle}"
+    content = args.discord_content or subtitle
     post_to_discord(webhook_url, outputs["png"], content)
     print("Posted heatmap to Discord.")
 

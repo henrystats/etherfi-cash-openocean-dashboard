@@ -2,23 +2,6 @@ name: Post Discord OpenOcean heatmap
 
 on:
   workflow_dispatch:
-    inputs:
-      basis:
-        description: "Quote basis to render"
-        required: true
-        default: "24h-median"
-        type: choice
-        options:
-          - "24h-median"
-          - "latest"
-      pair_scope:
-        description: "Pairs to include"
-        required: true
-        default: "usdc"
-        type: choice
-        options:
-          - "usdc"
-          - "all"
   workflow_run:
     workflows: ["Refresh OpenOcean quote snapshots"]
     types: [completed]
@@ -36,8 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      REPORT_BASIS: ${{ github.event.inputs.basis || '24h-median' }}
-      REPORT_PAIR_SCOPE: ${{ github.event.inputs.pair_scope || 'usdc' }}
 
     steps:
       - name: Check out repository
@@ -59,8 +40,8 @@ jobs:
       - name: Generate and post heatmap
         run: |
           python scripts/post_discord_heatmap.py \
-            --basis "$REPORT_BASIS" \
-            --pair-scope "$REPORT_PAIR_SCOPE" \
+            --basis 24h-median \
+            --pair-scope usdc \
             --post-discord
 
       - name: Upload report artifacts
